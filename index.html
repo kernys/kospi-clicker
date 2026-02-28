@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>KOSPI Clicker 🇰🇷</title>
+<style>
+  @font-face {
+    font-family: 'Pixel';
+    src: local('Courier New'), local('monospace');
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a1a;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { display: block; }
+  #shareBtn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: #fff;
+    border: 3px solid #ff8888;
+    padding: 10px 18px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    image-rendering: pixelated;
+    z-index: 10;
+  }
+  #shareBtn:active { background: #cc2222; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="shareBtn">📤 공유하기</button>
+<script>
+// ============================================
+// KOSPI CLICKER - 코스피 클리커 밈 게임
+// ============================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- State ---
+let kospi = 2000;
+let clickPower = 1;
+let totalClicks = 0;
+let combo = 0;
+let comboTimer = 0;
+let gameWon = false;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let eventText = '';
+let eventTimer = 0;
+let eventColor = '#00ff00';
+let lastEventTime = 0;
+let milestoneText = '';
+let milestoneTimer = 0;
+let flashAlpha = 0;
+
+// Particles
+const particles = [];
+const confetti = [];
+const floatingTexts = [];
+const chartData = [2000];
+
+// Milestones
+const milestones = [3000, 5000, 10000, 50000, 100000];
+const reachedMilestones = new Set();
+
+// Upgrades
+const upgrades = [
+  { name: '개미군단', desc: '클릭 +2', cost: 500, power: 2, bought: false },
+  { name: '동학개미', desc: '클릭 +5', cost: 2000, power: 5, bought: false },
+  { name: '슈퍼개미', desc: '클릭 +15', cost: 8000, power: 15, bought: false },
+  { name: '기관투자자', desc: '클릭 +50', cost: 25000, power: 50, bought: false },
+  { name: '국민연금', desc: '클릭 +200', cost: 60000, power: 200, bought: false },
+];
+
+// Random Events
+const positiveEvents = [
+  { text: '삼성 실적 서프라이즈! 🚀', value: 500 },
+  { text: 'SK하이닉스 HBM 대박! 💎', value: 400 },
+  { text: '외국인 순매수 폭발! 🔥', value: 300 },
+  { text: '금리 인하 발표! 📉→📈', value: 600 },
+  { text: '한미 정상회담 호재! 🤝', value: 350 },
+  { text: '반도체 슈퍼사이클! 🏭', value: 700 },
+  { text: '개미들의 역습! 🐜🐜🐜', value: 250 },
+  { text: 'K-배터리 수주 대박! 🔋', value: 450 },
+  { text: 'BTS 컴백! 문화주 급등! 🎤', value: 200 },
+  { text: '치킨값 안올라! 소비심리↑', value: 150 },
+  { text: 'AI 테마주 폭등! 🤖', value: 550 },
+  { text: '환율 급락! 외국인 유입! 💵', value: 400 },
+  { text: '코스피 저평가 보고서! 📊', value: 300 },
+  { text: '대한민국 GDP 서프라이즈!', value: 500 },
+];
+
+const negativeEvents = [
+  { text: '외국인 매도 폭탄! 💣', value: -200 },
+  { text: '미국 금리 인상?! 😱', value: -300 },
+  { text: '중국 리스크 확대! 🇨🇳', value: -250 },
+  { text: '공매도 재개! 📉', value: -400 },
+  { text: '환율 폭등! 원화 약세! 💸', value: -200 },
+  { text: '반도체 가격 하락! 😰', value: -350 },
+  { text: '빚투 반대매매 공포! 💀', value: -300 },
+  { text: '부동산 폭락설! 🏠📉', value: -150 },
+  { text: '김치 프리미엄 폭발! 🥬', value: -100 },
+  { text: '유가 급등! 인플레! ⛽', value: -250 },
+];
+
+// --- Audio ---
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+function initAudio() {
+  if (!audioCtx) audioCtx = new AudioCtx();
+}
+
+function playBeep(freq, duration, type = 'square', vol = 0.15) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function playClick() {
+  const freq = 400 + combo * 30 + Math.random() * 100;
+  playBeep(freq, 0.08, 'square', 0.1);
+}
+
+function playEvent(positive) {
+  if (positive) {
+    playBeep(523, 0.1, 'square', 0.12);
+    setTimeout(() => playBeep(659, 0.1, 'square', 0.12), 100);
+    setTimeout(() => playBeep(784, 0.15, 'square', 0.12), 200);
+  } else {
+    playBeep(300, 0.2, 'sawtooth', 0.12);
+    setTimeout(() => playBeep(200, 0.3, 'sawtooth', 0.12), 150);
+  }
+}
+
+function playMilestone() {
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((n, i) => {
+    setTimeout(() => playBeep(n, 0.2, 'square', 0.15), i * 120);
+  });
+  setTimeout(() => playBeep(1047, 0.5, 'triangle', 0.2), 500);
+}
+
+function playWin() {
+  const melody = [523, 587, 659, 784, 880, 988, 1047, 1175, 1319];
+  melody.forEach((n, i) => {
+    setTimeout(() => playBeep(n, 0.25, 'square', 0.15), i * 100);
+  });
+}
+
+// --- Resize ---
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Pixel Text ---
+function pixelText(text, x, y, size, color, align = 'center') {
+  ctx.save();
+  ctx.font = `bold ${size}px "Courier New", monospace`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  // Shadow
+  ctx.fillStyle = '#000';
+  ctx.fillText(text, x + 2, y + 2);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// --- Confetti ---
+function spawnConfetti(x, y, count) {
+  const colors = ['#ff0000', '#ffaa00', '#ffff00', '#00ff00', '#0088ff',
+                  '#ff00ff', '#ff4444', '#44ff44', '#4444ff', '#ffffff'];
+  for (let i = 0; i < count; i++) {
+    confetti.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 15,
+      vy: -Math.random() * 12 - 3,
+      size: Math.random() * 6 + 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      life: 1,
+      rot: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.3,
+    });
+  }
+}
+
+function spawnFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 1, vy: -2 });
+}
+
+// --- Chart ---
+function drawChart() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const chartX = 20;
+  const chartY = h - 130;
+  const chartW = w - 40;
+  const chartH = 80;
+
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#0a1628';
+  ctx.fillRect(chartX, chartY, chartW, chartH);
+  ctx.strokeStyle = '#1a3a5c';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(chartX, chartY, chartW, chartH);
+
+  // Grid lines
+  ctx.strokeStyle = '#0d2240';
+  for (let i = 1; i < 4; i++) {
+    const gy = chartY + (chartH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(chartX, gy);
+    ctx.lineTo(chartX + chartW, gy);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  if (chartData.length > 1) {
+    const maxVal = Math.max(...chartData, 3000);
+    const minVal = Math.min(...chartData, 1500);
+    const range = maxVal - minVal || 1;
+    const step = chartW / Math.max(chartData.length - 1, 1);
+
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(chartX, chartY + chartH);
+    chartData.forEach((v, i) => {
+      const px = chartX + i * step;
+      const py = chartY + chartH - ((v - minVal) / range) * chartH;
+      ctx.lineTo(px, py);
+    });
+    ctx.lineTo(chartX + (chartData.length - 1) * step, chartY + chartH);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, chartY, 0, chartY + chartH);
+    grad.addColorStop(0, 'rgba(255, 50, 50, 0.3)');
+    grad.addColorStop(1, 'rgba(255, 50, 50, 0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    chartData.forEach((v, i) => {
+      const px = chartX + i * step;
+      const py = chartY + chartH - ((v - minVal) / range) * chartH;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = kospi >= chartData[chartData.length - 2] ? '#ff3333' : '#3333ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  pixelText('KOSPI CHART', chartX + chartW / 2, chartY - 8, 10, '#556677');
+}
+
+// --- Draw Button Area (clickable KOSPI display) ---
+function getMainButtonRect() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const bw = Math.min(300, w - 40);
+  const bh = 120;
+  return { x: w / 2 - bw / 2, y: h / 2 - bh / 2 - 30, w: bw, h: bh };
+}
+
+// --- Upgrade Button Rects ---
+function getUpgradeRects() {
+  const w = canvas.width;
+  const startY = canvas.height / 2 + 90;
+  const bw = Math.min(260, w - 40);
+  const bh = 36;
+  const gap = 6;
+  return upgrades.map((u, i) => ({
+    x: w / 2 - bw / 2,
+    y: startY + i * (bh + gap),
+    w: bw,
+    h: bh,
+  }));
+}
+
+// --- Handle Click ---
+function handleClick(cx, cy) {
+  initAudio();
+
+  if (gameWon) return;
+
+  // Check upgrades
+  const uRects = getUpgradeRects();
+  for (let i = 0; i < upgrades.length; i++) {
+    const u = upgrades[i];
+    const r = uRects[i];
+    if (!u.bought && cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) {
+      const cost = u.cost;
+      if (kospi >= 2000 + cost) {
+        // "Spend" points: reduce from gained amount
+        kospi -= cost;
+        if (kospi < 2000) kospi = 2000;
+        clickPower += u.power;
+        u.bought = true;
+        playBeep(880, 0.15, 'square', 0.15);
+        playBeep(1100, 0.15, 'square', 0.12);
+        spawnFloatingText(cx, cy, u.name + ' 구매!', '#ffff00');
+        shakeTimer = 0.2;
+        shakeIntensity = 5;
+        return;
+      } else {
+        playBeep(150, 0.2, 'sawtooth', 0.1);
+        spawnFloatingText(cx, cy, '포인트 부족!', '#ff4444');
+        return;
+      }
+    }
+  }
+
+  // Main click
+  const btn = getMainButtonRect();
+  // Allow clicking anywhere in top portion
+  if (cy < canvas.height / 2 + 70) {
+    totalClicks++;
+    combo++;
+    comboTimer = 2;
+
+    let gain = clickPower;
+    if (combo > 10) gain = Math.floor(gain * 1.5);
+    if (combo > 30) gain = Math.floor(gain * 2);
+    if (combo > 50) gain = Math.floor(gain * 3);
+
+    kospi += gain;
+    playClick();
+
+    // Floating text
+    const txt = '+' + gain;
+    spawnFloatingText(cx + (Math.random() - 0.5) * 40, cy - 20, txt, '#00ff88');
+
+    // Particles
+    for (let i = 0; i < 3; i++) {
+      particles.push({
+        x: cx, y: cy,
+        vx: (Math.random() - 0.5) * 6,
+        vy: (Math.random() - 0.5) * 6,
+        life: 1,
+        color: combo > 10 ? '#ffaa00' : '#ff4444',
+        size: Math.random() * 4 + 2,
+      });
+    }
+
+    shakeTimer = 0.05;
+    shakeIntensity = 3;
+
+    // Chart update
+    if (chartData.length > 200) chartData.shift();
+    chartData.push(kospi);
+
+    // Check milestones
+    checkMilestones();
+  }
+}
+
+function checkMilestones() {
+  for (const m of milestones) {
+    if (kospi >= m && !reachedMilestones.has(m)) {
+      reachedMilestones.add(m);
+      if (m === 100000) {
+        gameWon = true;
+        milestoneText = '🎉 KOSPI 100,000 달성!! 🎉';
+        playWin();
+      } else {
+        milestoneText = '🎊 KOSPI ' + m.toLocaleString() + ' 돌파! 🎊';
+        playMilestone();
+      }
+      milestoneTimer = 3;
+      flashAlpha = 1;
+      // Confetti explosion
+      for (let i = 0; i < 8; i++) {
+        const rx = Math.random() * canvas.width;
+        const ry = Math.random() * canvas.height * 0.5;
+        spawnConfetti(rx, ry, 30);
+      }
+    }
+  }
+}
+
+// --- Events ---
+canvas.addEventListener('click', (e) => handleClick(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    handleClick(t.clientX, t.clientY);
+  }
+}, { passive: false });
+
+// --- Share ---
+document.getElementById('shareBtn').addEventListener('click', () => {
+  initAudio();
+  const text = `🇰🇷 KOSPI 클리커 🇰🇷\n\n` +
+    `📈 현재 KOSPI: ${Math.floor(kospi).toLocaleString()}\n` +
+    `🖱️ 총 클릭: ${totalClicks.toLocaleString()}\n` +
+    `💪 클릭당: +${clickPower}\n` +
+    `🏆 달성: ${reachedMilestones.size}/${milestones.length} 마일스톤\n\n` +
+    (gameWon ? '🎉 KOSPI 100,000 달성!! 전설의 개미!\n\n' : '') +
+    `#코스피클리커 #동학개미 #KOSPI`;
+
+  if (navigator.share) {
+    navigator.share({ title: 'KOSPI 클리커', text });
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      spawnFloatingText(canvas.width / 2, canvas.height / 2, '클립보드에 복사됨!', '#00ffaa');
+      playBeep(800, 0.1);
+    });
+  }
+});
+
+// --- Random Events ---
+function triggerRandomEvent() {
+  if (gameWon) return;
+  const isPositive = Math.random() > 0.35;
+  const pool = isPositive ? positiveEvents : negativeEvents;
+  const event = pool[Math.floor(Math.random() * pool.length)];
+
+  let val = event.value;
+  // Scale events with progress
+  if (kospi > 10000) val = Math.floor(val * 1.5);
+  if (kospi > 30000) val = Math.floor(val * 2);
+
+  kospi += val;
+  if (kospi < 1500) kospi = 1500;
+
+  eventText = event.text + (val > 0 ? ' +' : ' ') + val;
+  eventColor = val > 0 ? '#00ff88' : '#ff4444';
+  eventTimer = 3;
+
+  playEvent(val > 0);
+
+  if (val > 0) {
+    spawnConfetti(canvas.width / 2, canvas.height / 4, 15);
+  } else {
+    shakeTimer = 0.5;
+    shakeIntensity = 8;
+  }
+
+  chartData.push(kospi);
+  if (chartData.length > 200) chartData.shift();
+
+  checkMilestones();
+}
+
+// --- Stars background ---
+const stars = [];
+for (let i = 0; i < 80; i++) {
+  stars.push({
+    x: Math.random(), y: Math.random(),
+    size: Math.random() * 2 + 0.5,
+    speed: Math.random() * 0.2 + 0.05,
+    brightness: Math.random(),
+  });
+}
+
+// --- Main Loop ---
+let lastTime = performance.now();
+let eventClock = 0;
+
+function update(dt) {
+  // Combo decay
+  if (comboTimer > 0) {
+    comboTimer -= dt;
+    if (comboTimer <= 0) { combo = 0; comboTimer = 0; }
+  }
+
+  // Shake
+  if (shakeTimer > 0) shakeTimer -= dt;
+
+  // Event timer
+  if (eventTimer > 0) eventTimer -= dt;
+
+  // Milestone timer
+  if (milestoneTimer > 0) milestoneTimer -= dt;
+
+  // Flash
+  if (flashAlpha > 0) flashAlpha -= dt * 2;
+
+  // Random events every 5s
+  eventClock += dt;
+  if (eventClock >= 5) {
+    eventClock = 0;
+    triggerRandomEvent();
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= dt * 2;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Confetti
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const c = confetti[i];
+    c.x += c.vx;
+    c.y += c.vy;
+    c.vy += 15 * dt; // gravity
+    c.vx *= 0.99;
+    c.rot += c.rotSpeed;
+    c.life -= dt * 0.5;
+    if (c.life <= 0) confetti.splice(i, 1);
+  }
+
+  // Floating texts
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const f = floatingTexts[i];
+    f.y += f.vy;
+    f.life -= dt * 1.2;
+    if (f.life <= 0) floatingTexts.splice(i, 1);
+  }
+
+  // Stars twinkle
+  stars.forEach(s => {
+    s.brightness += (Math.random() - 0.5) * dt * 2;
+    if (s.brightness < 0.2) s.brightness = 0.2;
+    if (s.brightness > 1) s.brightness = 1;
+  });
+}
+
+function draw() {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.save();
+
+  // Shake
+  if (shakeTimer > 0) {
+    const sx = (Math.random() - 0.5) * shakeIntensity;
+    const sy = (Math.random() - 0.5) * shakeIntensity;
+    ctx.translate(sx, sy);
+  }
+
+  // Background gradient
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+  bgGrad.addColorStop(0, '#0a0a2e');
+  bgGrad.addColorStop(0.5, '#0a1628');
+  bgGrad.addColorStop(1, '#0a0a1a');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(-10, -10, w + 20, h + 20);
+
+  // Stars
+  stars.forEach(s => {
+    ctx.fillStyle = `rgba(255,255,255,${s.brightness * 0.6})`;
+    ctx.fillRect(s.x * w, s.y * h, s.size, s.size);
+  });
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let i = 0; i < h; i += 3) {
+    ctx.fillRect(0, i, w, 1);
+  }
+
+  // Title
+  pixelText('🇰🇷 KOSPI 클리커 🇰🇷', w / 2, 35, 20, '#ff6666');
+
+  // KOSPI value
+  const kospiStr = Math.floor(kospi).toLocaleString();
+  const kospiColor = kospi >= 2500 ? (kospi >= 10000 ? '#ffaa00' : '#ff4444') : '#4444ff';
+
+  // Pulsing glow for high values
+  if (kospi >= 10000) {
+    const pulse = Math.sin(performance.now() / 200) * 0.3 + 0.5;
+    ctx.save();
+    ctx.shadowColor = kospiColor;
+    ctx.shadowBlur = 20 * pulse;
+    pixelText(kospiStr, w / 2, 85, 48, kospiColor);
+    ctx.restore();
+  } else {
+    pixelText(kospiStr, w / 2, 85, 44, kospiColor);
+  }
+
+  pixelText('KOSPI', w / 2, 118, 14, '#888888');
+
+  // Click power & combo
+  pixelText(`클릭: +${clickPower}`, w / 2 - 70, 145, 12, '#aaaaaa');
+  if (combo > 0) {
+    const comboColor = combo > 30 ? '#ff00ff' : (combo > 10 ? '#ffaa00' : '#00ff88');
+    pixelText(`${combo}x COMBO!`, w / 2 + 70, 145, 12, comboColor);
+  }
+  pixelText(`총 클릭: ${totalClicks}`, w / 2, 165, 11, '#666666');
+
+  // Main button
+  const btn = getMainButtonRect();
+  const btnGrad = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
+  btnGrad.addColorStop(0, '#2a1a3a');
+  btnGrad.addColorStop(1, '#1a0a2a');
+  ctx.fillStyle = btnGrad;
+  ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+
+  // Button border (pixel style)
+  ctx.strokeStyle = '#ff4466';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+  // Inner highlight
+  ctx.strokeStyle = 'rgba(255,100,150,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(btn.x + 4, btn.y + 4, btn.w - 8, btn.h - 8);
+
+  // Button text
+  pixelText('📈 매수 클릭! 📈', btn.x + btn.w / 2, btn.y + btn.h / 2 - 10, 20, '#ffffff');
+  pixelText('터치하여 KOSPI 올리기', btn.x + btn.w / 2, btn.y + btn.h / 2 + 18, 11, '#aa88bb');
+
+  // Progress bar
+  const pBarW = Math.min(280, w - 60);
+  const pBarX = w / 2 - pBarW / 2;
+  const pBarY = btn.y + btn.h + 15;
+  const progress = Math.min((kospi - 2000) / (100000 - 2000), 1);
+
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(pBarX, pBarY, pBarW, 14);
+  ctx.strokeStyle = '#333355';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pBarX, pBarY, pBarW, 14);
+
+  const barGrad = ctx.createLinearGradient(pBarX, 0, pBarX + pBarW * progress, 0);
+  barGrad.addColorStop(0, '#ff2244');
+  barGrad.addColorStop(0.5, '#ff6644');
+  barGrad.addColorStop(1, '#ffaa22');
+  ctx.fillStyle = barGrad;
+  ctx.fillRect(pBarX + 1, pBarY + 1, (pBarW - 2) * progress, 12);
+
+  pixelText(`${(progress * 100).toFixed(1)}% → 100,000`, w / 2, pBarY + 28, 10, '#777799');
+
+  // Milestone markers on progress bar
+  milestones.forEach(m => {
+    const mp = (m - 2000) / (100000 - 2000);
+    const mx = pBarX + pBarW * mp;
+    ctx.fillStyle = reachedMilestones.has(m) ? '#ffaa00' : '#333355';
+    ctx.fillRect(mx - 1, pBarY - 3, 2, 20);
+  });
+
+  // Upgrades
+  const uRects = getUpgradeRects();
+  upgrades.forEach((u, i) => {
+    const r = uRects[i];
+    if (r.y + r.h > h - 140) return; // Don't draw if overlapping chart
+
+    if (u.bought) {
+      ctx.fillStyle = '#0a2a0a';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = '#00aa44';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      pixelText(`✅ ${u.name} (${u.desc})`, r.x + r.w / 2, r.y + r.h / 2, 11, '#00aa44');
+    } else {
+      const canBuy = kospi >= 2000 + u.cost;
+      ctx.fillStyle = canBuy ? '#1a1a3a' : '#111122';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = canBuy ? '#6666ff' : '#333344';
+      ctx.lineWidth = canBuy ? 2 : 1;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      const col = canBuy ? '#aaaaff' : '#555566';
+      pixelText(`${u.name} - ${u.desc} [${u.cost.toLocaleString()}P]`, r.x + r.w / 2, r.y + r.h / 2, 10, col);
+    }
+  });
+
+  // Chart
+  drawChart();
+
+  // Event notification
+  if (eventTimer > 0) {
+    const alpha = Math.min(eventTimer, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const ew = Math.min(w - 20, 400);
+    const ex = w / 2 - ew / 2;
+    const ey = 185;
+    ctx.fillStyle = eventColor === '#00ff88' ? 'rgba(0,40,0,0.9)' : 'rgba(40,0,0,0.9)';
+    ctx.fillRect(ex, ey, ew, 36);
+    ctx.strokeStyle = eventColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ex, ey, ew, 36);
+    pixelText(eventText, w / 2, ey + 18, 13, eventColor);
+    ctx.restore();
+  }
+
+  // Milestone banner
+  if (milestoneTimer > 0) {
+    const alpha = Math.min(milestoneTimer, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(50,30,0,0.95)';
+    ctx.fillRect(0, h / 2 - 40, w, 80);
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(5, h / 2 - 38, w - 10, 76);
+    pixelText(milestoneText, w / 2, h / 2, 22, '#ffdd44');
+    ctx.restore();
+  }
+
+  // Win screen
+  if (gameWon) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, w, h);
+
+    const pulse = Math.sin(performance.now() / 300) * 5;
+    ctx.shadowColor = '#ffaa00';
+    ctx.shadowBlur = 30;
+    pixelText('🏆 전설의 개미 🏆', w / 2, h / 2 - 50 + pulse, 28, '#ffdd00');
+    pixelText('KOSPI 100,000 달성!', w / 2, h / 2, 20, '#ff8844');
+    pixelText(`총 ${totalClicks.toLocaleString()}번의 클릭`, w / 2, h / 2 + 35, 14, '#aaaaaa');
+    pixelText('🎉 대한민국 만세! 🎉', w / 2, h / 2 + 70, 16, '#ff4488');
+    ctx.restore();
+
+    // Continuous confetti
+    if (Math.random() < 0.3) {
+      spawnConfetti(Math.random() * w, -10, 3);
+    }
+  }
+
+  // Flash
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255,255,200,${flashAlpha * 0.3})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+
+  // Confetti
+  confetti.forEach(c => {
+    ctx.save();
+    ctx.globalAlpha = c.life;
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.rot);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size * 0.6);
+    ctx.restore();
+  });
+
+  // Floating texts
+  floatingTexts.forEach(f => {
+    ctx.globalAlpha = f.life;
+    pixelText(f.text, f.x, f.y, 16, f.color);
+  });
+  ctx.globalAlpha = 1;
+
+  // CRT vignette
+  const vignette = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h * 0.9);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.4)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.restore();
+}
+
+function gameLoop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
